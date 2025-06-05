@@ -2,55 +2,57 @@
 from flask import Flask, request, jsonify
 import cv2
 import numpy as np
-import tempfile
-import os
+import base64
 
 app = Flask(__name__)
 
-# Configurável: tamanho real do marcador em centímetros
+# Largura real do quadrado marcador em centímetros
 MARKER_WIDTH_CM = 5.0
 
 @app.route('/processar-imagem', methods=['POST'])
 def processar_imagem():
     try:
-        # Recebe a imagem
         data = request.get_json()
         if not data or 'image' not in data:
             return jsonify({'erro': 'Imagem não recebida'}), 400
 
-        # Decodifica base64
-        import base64
         image_data = base64.b64decode(data['image'])
         npimg = np.frombuffer(image_data, np.uint8)
         img = cv2.imdecode(npimg, cv2.IMREAD_COLOR)
 
-        # Converte para escala de cinza e aplica blur
+        if img is None:
+            return jsonify({'erro': 'Falha ao decodificar imagem'}), 400
+
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         blurred = cv2.GaussianBlur(gray, (5, 5), 0)
         edged = cv2.Canny(blurred, 50, 150)
 
-        # Encontra contornos
         contours, _ = cv2.findContours(edged.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours:
             return jsonify({'erro': 'Nenhum contorno encontrado'}), 400
 
-        # Ordena por área e assume que o maior contorno é a caixa
-        contours = sorted(contours, key=cv2.contourArea, reverse=True)
-        box_contour = contours[0]
+        # Detecta marcador quadrado de referência (5x5cm)
+        marker = None
+        for cnt in contours:
+            x, y, w, h = cv2.boundingRect(cnt)
+            aspect_ratio = w / float(h)
+            area = cv2.contourArea(cnt)
+            if 0.9 < aspect_ratio < 1.1 and 500 < area < 5000:
+                marker = (w, h)
+                break
+
+        if marker is None:
+            return jsonify({'erro': 'Marcador de referência não encontrado'}), 400
+
+        pixels_per_cm = marker[0] / MARKER_WIDTH_CM
+
+        # Detecta a maior caixa (assume que seja o maior contorno)
+        box_contour = max(contours, key=cv2.contourArea)
         x, y, w, h = cv2.boundingRect(box_contour)
-
-        # Detecta o marcador como o menor contorno retangular visível (opcional: ArUco, QR, etc.)
-        marker_contour = min(contours, key=cv2.contourArea)
-        _, _, mw, _ = cv2.boundingRect(marker_contour)
-        if mw == 0:
-            return jsonify({'erro': 'Erro na medição do marcador'}), 400
-
-        # Proporção pixels/cm
-        pixels_per_cm = mw / MARKER_WIDTH_CM
 
         comprimento = round(w / pixels_per_cm, 1)
         largura = round(h / pixels_per_cm, 1)
-        altura = round(min(comprimento, largura) / 2, 1)  # Heurística: altura estimada
+        altura = round(min(comprimento, largura) / 2, 1)  # heurística
 
         return jsonify({
             'length': comprimento,
