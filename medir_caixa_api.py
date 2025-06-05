@@ -6,7 +6,7 @@ import base64
 
 app = Flask(__name__)
 
-# Largura real do quadrado marcador em centímetros
+# Largura real da etiqueta branca que contém o marcador em centímetros
 MARKER_WIDTH_CM = 5.0
 
 @app.route('/processar-imagem', methods=['POST'])
@@ -31,18 +31,18 @@ def processar_imagem():
         if not contours:
             return jsonify({'erro': 'Nenhum contorno encontrado'}), 400
 
-        # Detecta marcador quadrado de referência (5x5cm)
+        # Detecta o retângulo branco da etiqueta como referência (mais largo que alto)
         marker = None
         for cnt in contours:
             x, y, w, h = cv2.boundingRect(cnt)
             aspect_ratio = w / float(h)
             area = cv2.contourArea(cnt)
-            if 0.9 < aspect_ratio < 1.1 and 500 < area < 5000:
+            if 0.8 < aspect_ratio < 2.0 and 500 < area < 10000:
                 marker = (w, h)
                 break
 
         if marker is None:
-            return jsonify({'erro': 'Marcador de referência não encontrado'}), 400
+            return jsonify({'erro': 'Etiqueta de referência não encontrada'}), 400
 
         pixels_per_cm = marker[0] / MARKER_WIDTH_CM
 
